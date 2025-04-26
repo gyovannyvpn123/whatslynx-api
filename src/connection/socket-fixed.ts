@@ -14,13 +14,16 @@ import { ConnectionState, WhatsLynxEvents } from '../types';
 import { 
   base64Encode, 
   base64Decode,
-  encryptAndSign, 
   generateKeyPair, 
   computeSharedSecret, 
   generateRandomBytes, 
-  hmacSha256,
-  verifyAndDecrypt
+  hmacSha256
 } from '../utils/encryption';
+
+import {
+  encryptAndSignToBuffer,
+  verifyAndDecryptFromBuffer
+} from '../utils/encryption-helpers';
 
 const VERSION = [2, 2318, 11];
 
@@ -137,10 +140,20 @@ export class SocketConnection extends EventEmitter {
   
   /**
    * Disconnect from the WebSocket server
-   * @param code Close code
-   * @param reason Close reason
+   * @param codeOrReason Close code or reason string
+   * @param reason Close reason (when first parameter is code)
    */
-  async disconnect(code: number = 1000, reason: string = 'Normal closure'): Promise<void> {
+  async disconnect(codeOrReason: number | string = 1000, reason?: string): Promise<void> {
+    // Process parameters to handle both formats (code, reason) and (reason)
+    let code = 1000;
+    let closeReason = 'Normal closure';
+    
+    if (typeof codeOrReason === 'string') {
+      closeReason = codeOrReason;
+    } else {
+      code = codeOrReason;
+      if (reason) closeReason = reason;
+    }
     if (!this.socket || this.isClosing) {
       return; // Already disconnected or disconnecting
     }
@@ -166,7 +179,7 @@ export class SocketConnection extends EventEmitter {
       }
       
       // Close the connection
-      this.socket.close(code, reason);
+      this.socket.close(code, closeReason);
       
       // Reset authentication state
       this.authenticated = false;
@@ -283,7 +296,7 @@ export class SocketConnection extends EventEmitter {
       // Serialize and encrypt the message
       let serialized = serializeNode(message);
       if (this.encKey && this.macKey) {
-        serialized = encryptAndSign(serialized, this.encKey, this.macKey);
+        serialized = encryptAndSignToBuffer(this.encKey, this.macKey, serialized);
       }
       
       // Set up the callback
@@ -497,7 +510,7 @@ export class SocketConnection extends EventEmitter {
         let decrypted = buffer;
         if (this.encKey.length > 0 && this.macKey.length > 0) {
           // Keys are initialized and valid
-          const result = verifyAndDecrypt(buffer, this.encKey, this.macKey);
+          const result = verifyAndDecryptFromBuffer(this.encKey, this.macKey, buffer);
           // Verificăm dacă rezultatul nu este null înainte de a-l atribui
           if (result !== null) {
             decrypted = result;

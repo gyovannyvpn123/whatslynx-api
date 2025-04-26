@@ -38,6 +38,18 @@ export class WhatsLynxClient extends EventEmitter {
   public status: StatusManager;
 
   /**
+   * Internal logging function
+   * @param level Log level
+   * @param message Log message
+   * @param data Additional data
+   */
+  logger(level: "info" | "warn" | "error" | "debug", message: string, data?: any): void {
+    if (this.options.logger) {
+      this.options.logger(level, message, data);
+    }
+  }
+
+  /**
    * Create a new WhatsLynx client
    * @param options Client options
    */
@@ -80,16 +92,12 @@ export class WhatsLynxClient extends EventEmitter {
    */
   async connect(sessionData?: any): Promise<void> {
     if (this.connectionState === ConnectionState.CONNECTED) {
-      if (this.options.logger) {
-        this.options.logger('warn', 'Already connected, disconnect first');
-      }
+      this.logger('warn', 'Already connected, disconnect first');
       return;
     }
     
     if (this.connectionState === ConnectionState.CONNECTING) {
-      if (this.options.logger) {
-        this.options.logger('warn', 'Connection already in progress');
-      }
+      this.logger('warn', 'Connection already in progress');
       return;
     }
     
@@ -106,9 +114,7 @@ export class WhatsLynxClient extends EventEmitter {
       }
       
       // Attempt to connect socket
-      if (this.options.logger) {
-        this.options.logger('info', 'Connecting to WhatsApp Web...');
-      }
+      this.logger('info', 'Connecting to WhatsApp Web...');
       await this.socket.connect();
       
       // Start keepalive if enabled
@@ -122,9 +128,7 @@ export class WhatsLynxClient extends EventEmitter {
       // Set connection state to connected
       this.setConnectionState(ConnectionState.CONNECTED);
       
-      if (this.options.logger) {
-        this.options.logger('info', 'Connected to WhatsApp Web');
-      }
+      this.logger('info', 'Connected to WhatsApp Web');
     } catch (error) {
       // Set connection state to disconnected
       this.setConnectionState(ConnectionState.DISCONNECTED);
@@ -147,7 +151,7 @@ export class WhatsLynxClient extends EventEmitter {
    */
   async disconnect(reason: string = 'client_disconnect'): Promise<void> {
     if (this.connectionState === ConnectionState.DISCONNECTED) {
-      this.options.logger('warn', 'Already disconnected');
+      this.logger('warn', 'Already disconnected');
       return;
     }
     
@@ -173,7 +177,7 @@ export class WhatsLynxClient extends EventEmitter {
       // Emit disconnected event
       this.emit(WhatsLynxEvents.DISCONNECTED, { reason });
       
-      this.options.logger('info', `Disconnected from WhatsApp Web: ${reason}`);
+      this.logger('info', `Disconnected from WhatsApp Web: ${reason}`);
     } catch (error) {
       // Set connection state to disconnected anyway
       this.setConnectionState(ConnectionState.DISCONNECTED);
@@ -204,7 +208,7 @@ export class WhatsLynxClient extends EventEmitter {
       // Disconnect from server
       await this.disconnect('logout');
       
-      this.options.logger('info', 'Logged out successfully');
+      this.logger('info', 'Logged out successfully');
     } catch (error) {
       // Just clear session data and disconnect anyway
       this.clearSessionData();
@@ -305,9 +309,13 @@ export class WhatsLynxClient extends EventEmitter {
     }
     
     // Calculate delay with exponential backoff
+    const initialDelay = this.options.reconnectInitialDelay || 1000;
+    const backoffFactor = this.options.reconnectBackoffFactor || 1.5;
+    const maxDelay = this.options.reconnectMaxDelay || 60000;
+    
     const delay = Math.min(
-      this.options.reconnectInitialDelay * Math.pow(this.options.reconnectBackoffFactor, this.reconnectAttempts),
-      this.options.reconnectMaxDelay
+      initialDelay * Math.pow(backoffFactor, this.reconnectAttempts),
+      maxDelay
     );
     
     // Increment reconnect attempts
@@ -333,7 +341,7 @@ export class WhatsLynxClient extends EventEmitter {
         this.reconnectAttempts = 0;
       } catch (error) {
         // Log the error
-        this.options.logger('error', 'Reconnection attempt failed', error);
+        this.logger('error', 'Reconnection attempt failed', error);
         
         // Try again
         this.attemptReconnect(getErrorMessage(error));
@@ -396,7 +404,7 @@ export class WhatsLynxClient extends EventEmitter {
     // General error event
     this.on('error', (error: any) => {
       // Log errors to prevent unhandled error events
-      this.options.logger('error', 'WhatsLynx error', error);
+      this.logger('error', 'WhatsLynx error', error);
     });
   }
 }

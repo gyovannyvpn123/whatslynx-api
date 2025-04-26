@@ -17,6 +17,16 @@ export enum GroupMessageMode {
   ALL_PARTICIPANTS = 'all_participants'
 }
 
+// Logger interface
+export interface Logger {
+  info(message: string, data?: any): void;
+  warn(message: string, data?: any): void;
+  error(message: string, data?: any): void;
+  debug(message: string, data?: any): void;
+  trace?(message: string, data?: any): void;
+  child?(options: { [key: string]: any }): Logger;
+}
+
 // Client options interface
 export interface ClientOptions {
   /** Auto reconnect when disconnected */
@@ -65,8 +75,22 @@ export interface ClientOptions {
   maxMessageQueueSize?: number;
   /** Custom HTTP headers */
   customHeaders?: Record<string, string>;
-  /** Logger function */
-  logger?: (level: 'info' | 'warn' | 'error' | 'debug', message: string, data?: any) => void;
+  /** Whether to print QR code in terminal */
+  printQRInTerminal?: boolean;
+  /** Logger interface */
+  logger?: Logger;
+  /** Log level */
+  logLevel?: 'debug' | 'info' | 'warn' | 'error';
+  /** WhatsApp server URL */
+  serverUrl?: string;
+  /** Browser info tuple [browserName, browserVersion, osVersion] */
+  browser?: [string, string, string];
+  /** WhatsApp version tuple [major, minor, patch] */
+  version?: [number, number, number];
+  /** Whether to use pairing code authentication instead of QR */
+  usePairingCode?: boolean;
+  /** Phone number for pairing code auth (format: countryCode+number, e.g. 40712345678) */
+  pairingPhoneNumber?: string;
 }
 
 // Connection states
@@ -79,4 +103,44 @@ export enum ConnectionState {
   AUTHENTICATED = 'authenticated',
   RECONNECTING = 'reconnecting',
   LOGGED_OUT = 'logged_out'
+}
+
+// WhatsApp platform types
+export enum WhatsAppPlatform {
+  WEB = 'WEB',
+  ANDROID = 'ANDROID',
+  IOS = 'IOS',
+  DESKTOP = 'DESKTOP',
+  UNKNOWN = 'UNKNOWN'
+}
+
+// Connection types
+export enum ConnectionType {
+  WIFI = 'WIFI',
+  CELLULAR = 'CELLULAR',
+  UNKNOWN = 'UNKNOWN'
+}
+
+// Client device info
+export interface DeviceInfo {
+  /** Platform name (WEB, ANDROID, etc.) */
+  platform: WhatsAppPlatform;
+  /** Application version */
+  appVersion: string | { primary: number, secondary: number, tertiary: number };
+  /** Mobile country code */
+  mcc?: string;
+  /** Mobile network code */
+  mnc?: string;
+  /** OS version */
+  osVersion: string;
+  /** Device manufacturer */
+  manufacturer?: string;
+  /** Device model name */
+  device: string;
+  /** OS build number */
+  osBuildNumber?: string;
+  /** Language code (ISO 639-1) */
+  localeLanguageIso6391?: string;
+  /** Country code (ISO 3166-1 alpha-2) */
+  localeCountryIso31661Alpha2?: string;
 }

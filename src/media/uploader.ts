@@ -3,7 +3,8 @@ import * as path from 'path';
 import { generateMessageID } from '../utils/binary';
 import { isValidUrl } from '../utils/validators';
 import { WhatsLynxEvents } from '../types/events';
-import { encryptAndSign, generateRandomBytes, hkdf } from '../utils/encryption';
+import { generateRandomBytes, hkdf } from '../utils/encryption';
+import { encryptAndSignToBuffer } from '../utils/encryption-helpers';
 import { MessageType } from '../types';
 import { getErrorMessage } from '../utils/error-handler';
 
@@ -316,7 +317,7 @@ export class MediaUploader {
       const derivedMacKey = mediaKeyExpanded.slice(48, 80);
       
       // Encrypt and sign
-      return encryptAndSign(cipherKey, derivedMacKey, mediaData);
+      return encryptAndSignToBuffer(cipherKey, derivedMacKey, mediaData);
     } catch (error) {
       this.client.getOptions().logger('error', 'Media encryption failed', error);
       return null;

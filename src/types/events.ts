@@ -37,6 +37,7 @@ export enum WhatsLynxEvents {
   SESSION_DATA_UPDATED = 'session.data.updated',
   
   // Message events
+  RAW_MESSAGE_RECEIVED = 'raw.message.received',
   MESSAGE_RECEIVED = 'message.received',
   MESSAGE_SENDING = 'message.sending',
   MESSAGE_SENT = 'message.sent',

@@ -1,4 +1,4 @@
-import { ClientOptions } from '../types';
+import { ClientOptions, WhatsAppPlatform } from '../types';
 
 /**
  * Default WhatsApp Web URL
@@ -13,23 +13,22 @@ export const DEFAULT_WEBSOCKET_URL = 'wss://web.whatsapp.com/ws';
 /**
  * Default User Agent
  */
-export const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
+export const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36';
+
+/**
+ * Default browser information
+ */
+export const DEFAULT_BROWSER: [string, string, string] = ['Chrome', '108.0.0.0', '10'];
+
+/**
+ * Default WhatsApp version
+ */
+export const DEFAULT_WA_VERSION: [number, number, number] = [2, 2330, 7];
 
 /**
  * Default client options
  */
 export const DEFAULT_CLIENT_OPTIONS: ClientOptions = {
-  logger: (level, message, data) => {
-    if (level === 'error') {
-      console.error(`[WhatsLynx] ${message}`, data || '');
-    } else if (level === 'warn') {
-      console.warn(`[WhatsLynx] ${message}`, data || '');
-    } else if (level === 'info') {
-      console.info(`[WhatsLynx] ${message}`, data || '');
-    } else if (level === 'debug') {
-      console.debug(`[WhatsLynx] ${message}`, data || '');
-    }
-  },
   autoReconnect: true,
   maxReconnectAttempts: 10,
   reconnectInterval: 5000,
@@ -41,7 +40,7 @@ export const DEFAULT_CLIENT_OPTIONS: ClientOptions = {
   saveInterval: 300000, // 5 minutes
   deviceName: 'WhatsLynx Client',
   browserName: 'Chrome',
-  browserVersion: '91.0.4472.124',
+  browserVersion: '108.0.0.0',
   userAgent: DEFAULT_USER_AGENT,
   maxQrRequests: 5,
   maxQRAttempts: 3,
@@ -52,7 +51,22 @@ export const DEFAULT_CLIENT_OPTIONS: ClientOptions = {
   customHeaders: {},
   syncContacts: true,
   syncChats: true,
-  handlePresence: true
+  handlePresence: true,
+  
+  // Added new options
+  logLevel: 'info',
+  serverUrl: DEFAULT_WEBSOCKET_URL,
+  browser: DEFAULT_BROWSER,
+  version: DEFAULT_WA_VERSION,
+  usePairingCode: false,
+  
+  // Default logger implementation
+  logger: {
+    info: (message, data) => console.info(`[WhatsLynx] ${message}`, data || ''),
+    warn: (message, data) => console.warn(`[WhatsLynx] ${message}`, data || ''),
+    error: (message, data) => console.error(`[WhatsLynx] ${message}`, data || ''),
+    debug: (message, data) => console.debug(`[WhatsLynx] ${message}`, data || '')
+  }
 };
 
 /**

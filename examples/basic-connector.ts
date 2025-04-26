@@ -6,106 +6,118 @@
  * do any message sending.
  */
 
-import EventEmitter from 'events';
-import qrcode from 'qrcode-terminal';
-import { ConnectionState, WhatsLynxEvents } from '../src/types';
-import { getErrorMessage } from '../src/utils/error-handler';
+import { WhatsLynxClient } from '../src/client-fixed4';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as qrcode from 'qrcode-terminal';
 
-// Import WhatsLynxClient
-// We're using the default import from the root, which should be the fixed version
-import WhatsLynxClient from '../src';
+// Define session file path
+const SESSION_FILE_PATH = path.join(__dirname, 'session.json');
 
-// Create client instance
-const client = new WhatsLynxClient({
-  deviceName: 'WhatsLynx Basic Connector',
-  browserName: 'Chrome',
-  autoReconnect: true,
-  logger: (level, message, ...args) => {
-    console.log(`[${level.toUpperCase()}] ${message}`, ...args);
+// Define function to save session data
+async function saveSession(sessionData: any) {
+  fs.writeFileSync(SESSION_FILE_PATH, JSON.stringify(sessionData, null, 2));
+  console.log('Session data saved to:', SESSION_FILE_PATH);
+}
+
+// Define function to load session data
+async function loadSession() {
+  if (fs.existsSync(SESSION_FILE_PATH)) {
+    const sessionData = JSON.parse(fs.readFileSync(SESSION_FILE_PATH, 'utf8'));
+    console.log('Session data loaded from:', SESSION_FILE_PATH);
+    return sessionData;
   }
-});
+  console.log('No previous session found.');
+  return null;
+}
 
-// Set up authentication event handlers
-client.on(WhatsLynxEvents.QR_CODE_RECEIVED, (qr: any) => {
-  console.log('Please scan this QR code with your WhatsApp:');
-  qrcode.generate(qr.qrCode, { small: true });
-  console.log(`QR Code expires in ${Math.floor(qr.timeout / 1000)} seconds. Attempt ${qr.attempts}/${client.getOptions().maxQRAttempts || 5}`);
-});
-
-client.on(WhatsLynxEvents.PAIRING_CODE_RECEIVED, (data: any) => {
-  console.log(`Pairing code: ${data.pairingCode}`);
-  console.log(`Enter this code in your WhatsApp app to authenticate.`);
-  console.log(`Code expires at: ${new Date(data.pairingCodeExpiresAt).toLocaleString()}`);
-});
-
-// Set up connection event handlers
-client.on(WhatsLynxEvents.CONNECTED, () => {
-  console.log('Connected to WhatsApp servers!');
-  console.log(`Connection state: ${client.getConnectionState()}`);
-  console.log(`Authenticated: ${client.auth.isAuthenticated() ? 'Yes ✅' : 'No ❌'}`);
-});
-
-client.on(WhatsLynxEvents.DISCONNECTED, (reason: any) => {
-  console.log('Disconnected from WhatsApp:', reason);
-});
-
-client.on(WhatsLynxEvents.CONNECTING, () => {
-  console.log('Connecting to WhatsApp...');
-});
-
-client.on(WhatsLynxEvents.RECONNECTING, (info: any) => {
-  console.log(`Reconnecting to WhatsApp. Attempt ${info.attempts}/${client.getOptions().maxReconnectAttempts}...`);
-});
-
-// Handle authentication events
-client.on(WhatsLynxEvents.AUTHENTICATED, () => {
-  console.log('Authenticated successfully!');
-  
-  // You could save the session data here if needed
-  const sessionData = client.getSessionData();
-  console.log('Session data available:', sessionData ? 'Yes' : 'No');
-});
-
-client.on(WhatsLynxEvents.AUTH_FAILED, (error: any) => {
-  console.error('Authentication failed:', error.message);
-});
-
-// Handle errors
-client.on(WhatsLynxEvents.ERROR, (error: any) => {
-  console.error('Error occurred:', getErrorMessage(error));
-});
-
-// Start the connection process
+// Main function to start the connector
 async function start() {
-  try {
-    console.log('Starting WhatsLynx Basic Connector...');
-    
-    // Connect to WhatsApp server
-    await client.connect();
-    
-    // Choose authentication method - we'll use QR code for simplicity
-    console.log('Starting QR code authentication. Please scan the QR code with your WhatsApp app.');
-    await client.auth.startAuthentication();
-    
-    console.log('Waiting for authentication...');
-    
-    // Handle graceful shutdown
-    process.on('SIGINT', async () => {
-      console.log('\nReceived SIGINT. Shutting down...');
-      try {
-        await client.disconnect('user_shutdown');
-        console.log('Disconnected successfully.');
-      } catch (error: unknown) {
-        console.error('Error during shutdown:', getErrorMessage(error));
+  // Create client instance with custom settings
+  const client = new WhatsLynxClient({
+    deviceName: 'WhatsLynx Basic Demo',
+    autoReconnect: true,
+    printQRInTerminal: true,
+    // Custom logger for more detailed output
+    logger: (level, message, data) => {
+      const timestamp = new Date().toISOString();
+      if (data) {
+        console.log(`[${timestamp}] [${level.toUpperCase()}] ${message}`, typeof data === 'object' ? JSON.stringify(data, null, 2) : data);
+      } else {
+        console.log(`[${timestamp}] [${level.toUpperCase()}] ${message}`);
       }
-      process.exit(0);
+    }
+  });
+
+  // Set up event listeners
+  client.on('auth.qr', (qrData) => {
+    console.log(`Please scan this QR code (attempt ${qrData.attempt}/${qrData.maxAttempts}):`);
+    // Generate QR code for terminal display
+    qrcode.generate(qrData.qrCode, { small: true });
+  });
+
+  client.on('auth.authenticated', async (data) => {
+    console.log('Authenticated successfully! User:', data.pushname || 'Unknown');
+    await saveSession(data);
+  });
+
+  client.on('connection.state', (update) => {
+    console.log(`Connection state changed: ${update.old} -> ${update.new}`);
+  });
+
+  client.on('connection.error', (error) => {
+    console.error('Connection error:', error);
+  });
+
+  client.on('auth.logout', () => {
+    console.log('Logged out from WhatsApp');
+    fs.existsSync(SESSION_FILE_PATH) && fs.unlinkSync(SESSION_FILE_PATH);
+  });
+
+  client.on('message.received', (msg) => {
+    console.log('New message received:', msg.body || '(Media/non-text message)');
+  });
+
+  // Connect to WhatsApp
+  try {
+    console.log('Loading session...');
+    const sessionData = await loadSession();
+    
+    console.log('Connecting to WhatsApp...');
+    await client.connect(sessionData);
+    
+    if (!sessionData) {
+      console.log('No session data found, starting authentication...');
+      await client.auth.startAuthentication();
+    }
+    
+    // Keep the process running
+    console.log('Connected! Press Ctrl+C to exit.');
+    
+    // Set up simple CLI
+    process.stdin.on('data', async (data) => {
+      const command = data.toString().trim();
+      
+      if (command === 'exit' || command === 'quit') {
+        console.log('Disconnecting...');
+        await client.disconnect();
+        process.exit(0);
+      } else if (command === 'status') {
+        console.log(`Connection status: ${client.getConnectionState()}`);
+        console.log(`Authenticated: ${client.auth.isAuthenticated()}`);
+      } else if (command === 'logout') {
+        console.log('Logging out...');
+        await client.logout();
+      } else if (command) {
+        console.log('Available commands: status, logout, exit/quit');
+      }
     });
     
-  } catch (error: unknown) {
-    console.error('Failed to start connector:', getErrorMessage(error));
+  } catch (error) {
+    console.error('Failed to start:', error);
     process.exit(1);
   }
 }
 
-// Run the example
+// Start the connector
 start();

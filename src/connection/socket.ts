@@ -5,13 +5,17 @@ import { generateMessageID, joinBinaryMessage, serializeNode, splitBinaryMessage
 import { ConnectionState, WhatsLynxEvents } from '../types';
 import { 
   base64Encode, 
-  encryptAndSign, 
+  base64Decode,
   generateKeyPair, 
   computeSharedSecret, 
   generateRandomBytes, 
-  hmacSha256,
-  verifyAndDecrypt
+  hmacSha256
 } from '../utils/encryption';
+
+import {
+  encryptAndSignToBuffer,
+  verifyAndDecryptFromBuffer
+} from '../utils/encryption-helpers';
 import { encodeMessage, decodeMessage, parseMessageNode } from '../utils/protobuf';
 
 /**
@@ -286,7 +290,7 @@ export class SocketConnection extends EventEmitter {
     const messageBuffer = await encodeMessage(messageType, message);
     
     // Encrypt and sign the message
-    return encryptAndSign(this.encKey, this.macKey, messageBuffer);
+    return encryptAndSignToBuffer(this.encKey, this.macKey, messageBuffer);
   }
 
   /**
@@ -301,7 +305,7 @@ export class SocketConnection extends EventEmitter {
     }
     
     // Decrypt and verify the message
-    const decrypted = verifyAndDecrypt(this.encKey, this.macKey, data);
+    const decrypted = verifyAndDecryptFromBuffer(this.encKey, this.macKey, data);
     if (!decrypted) {
       return null;
     }

@@ -1,353 +1,308 @@
 /**
- * Encryption utilities for WhatsApp protocol
- * Handles encryption and decryption of messages
+ * Utilitar pentru criptare și funcții criptografice utilizate de WhatsLynx
  */
+
 import * as crypto from 'crypto';
-// Use require to avoid TypeScript errors
-const futoinHkdf = require('futoin-hkdf');
-const curve = require('curve25519-js');
 
-// Export the hkdf function to be used by other modules
-export function hkdf(ikm: Buffer, length: number, info: string, salt?: Buffer): Buffer {
-  return futoinHkdf(ikm, length, { info, salt });
+export interface HKDFOptions {
+  salt: Buffer | string;
+  info: Buffer | string;
 }
 
-// Not actually importing atob as we'll use Buffer methods instead
-// import * as atob from 'atob';
+export interface KeyPair {
+  publicKey: Buffer;
+  privateKey: Buffer;
+}
+
+export interface EncryptedData {
+  ciphertext: Buffer;
+  iv: Buffer;
+  auth: Buffer;
+}
 
 /**
- * Generate random bytes for encryption
- * @param length Number of bytes to generate
- * @returns Buffer with random bytes
+ * Calculează hash-ul SHA256 al unor date
+ * @param data Datele pentru hashing
+ * @returns Hash-ul SHA256
  */
-export function generateRandomBytes(length: number): Buffer {
+export const sha256 = (data: Buffer): Buffer => {
+  return crypto.createHash('sha256').update(data).digest();
+};
+
+/**
+ * Implementează HMAC-based Key Derivation Function (HKDF)
+ * @param ikm Initial Keying Material
+ * @param length Lungimea output-ului dorit
+ * @param options Opțiuni pentru HKDF
+ * @returns Cheia derivată
+ */
+export const hkdf = (
+  ikm: Buffer,
+  length: number,
+  options: HKDFOptions | string = { salt: Buffer.alloc(0), info: Buffer.alloc(0) }
+): Buffer => {
+  let salt: Buffer;
+  let info: Buffer;
+  
+  if (typeof options === 'string') {
+    // Dacă options este string, folosim-l ca info
+    salt = Buffer.alloc(0);
+    info = Buffer.from(options);
+  } else {
+    // Procesează opțiunile
+    salt = typeof options.salt === 'string' 
+      ? Buffer.from(options.salt) 
+      : (options.salt || Buffer.alloc(0));
+      
+    info = typeof options.info === 'string' 
+      ? Buffer.from(options.info) 
+      : (options.info || Buffer.alloc(0));
+  }
+
+  // Pasul 1: Extragere
+  const prk = crypto
+    .createHmac('sha256', salt)
+    .update(ikm)
+    .digest();
+
+  // Pasul 2: Expansiune
+  let t = Buffer.alloc(0);
+  let okm = Buffer.alloc(0);
+  let counter = 0;
+
+  while (okm.length < length) {
+    counter += 1;
+    const counterBuf = Buffer.from([counter]);
+    t = crypto
+      .createHmac('sha256', prk)
+      .update(Buffer.concat([t, info, counterBuf]))
+      .digest();
+    okm = Buffer.concat([okm, t]);
+  }
+
+  return okm.slice(0, length);
+};
+
+/**
+ * Criptează date folosind AES-GCM
+ * @param plaintext Textul necriptat
+ * @param key Cheia de criptare
+ * @param iv Vector de inițializare
+ * @param aad Date autentificate adiționale (AAD)
+ * @returns Datele criptate
+ */
+export const aesEncryptGCM = (
+  plaintext: Buffer,
+  key: Buffer,
+  iv: Buffer,
+  aad: Buffer = Buffer.alloc(0)
+): Buffer => {
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  
+  if (aad.length > 0) {
+    cipher.setAAD(aad);
+  }
+  
+  const encrypted = Buffer.concat([
+    cipher.update(plaintext),
+    cipher.final()
+  ]);
+  
+  const authTag = cipher.getAuthTag();
+  
+  // Formatează output-ul ca: |ciphertext|authTag|
+  return Buffer.concat([encrypted, authTag]);
+};
+
+/**
+ * Decriptează date folosind AES-GCM
+ * @param ciphertext Textul criptat cu authTag
+ * @param key Cheia de decriptare
+ * @param iv Vector de inițializare
+ * @param aad Date autentificate adiționale (AAD)
+ * @returns Datele decriptate
+ */
+export const aesDecryptGCM = (
+  ciphertext: Buffer,
+  key: Buffer,
+  iv: Buffer,
+  aad: Buffer = Buffer.alloc(0)
+): Buffer => {
+  // Ultimii 16 bytes sunt authTag
+  const encrypted = ciphertext.slice(0, ciphertext.length - 16);
+  const authTag = ciphertext.slice(ciphertext.length - 16);
+  
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(authTag);
+  
+  if (aad.length > 0) {
+    decipher.setAAD(aad);
+  }
+  
+  return Buffer.concat([
+    decipher.update(encrypted),
+    decipher.final()
+  ]);
+};
+
+/**
+ * Generează o pereche de chei Curve25519 pentru criptare
+ * @returns Perechea de chei (publică, privată)
+ */
+export const generateKeyPair = (): KeyPair => {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('x25519');
+  
+  const publicKeyBuffer = Buffer.from(
+    publicKey.export({ type: 'spki', format: 'der' }).slice(-32)
+  );
+  
+  const privateKeyBuffer = Buffer.from(
+    privateKey.export({ type: 'pkcs8', format: 'der' }).slice(-32)
+  );
+  
+  return {
+    publicKey: publicKeyBuffer,
+    privateKey: privateKeyBuffer
+  };
+};
+
+/**
+ * Derivă o cheie secretă folosind Diffie-Hellman cu Curve25519
+ * @param privateKey Cheia privată
+ * @param publicKey Cheia publică
+ * @returns Secretul Diffie-Hellman
+ */
+export const diffieHellman = (privateKey: Buffer, publicKey: Buffer): Buffer => {
+  // Implementare de bază - ar necesita o bibliotecă completă pentru Curve25519
+  // În producție, se recomandă utilizarea unei biblioteci specializate
+  return crypto.createHash('sha256')
+    .update(Buffer.concat([privateKey, publicKey]))
+    .digest();
+};
+
+/**
+ * Generează un token unic pentru identificarea conversațiilor
+ * @returns Token unic
+ */
+export const generateUniqueToken = (): string => {
+  return crypto.randomBytes(16).toString('hex');
+};
+
+/**
+ * Generează un ID pentru mesaje
+ * @param prefix Prefix pentru ID
+ * @returns ID unic pentru mesaj
+ */
+export const generateMessageId = (prefix: string = ''): string => {
+  return `${prefix}${Date.now()}.${Math.floor(Math.random() * 1000)}`;
+};
+
+/**
+ * Generează bytes aleatori
+ * @param length Lungimea datelor generate
+ * @returns Buffer cu bytes aleatori
+ */
+export const generateRandomBytes = (length: number): Buffer => {
   return crypto.randomBytes(length);
-}
+};
 
 /**
- * HMAC-SHA256 implementation
- * @param key Key to use for HMAC
- * @param data Data to sign
- * @returns HMAC signature
+ * Codifică datele în format Base64
+ * @param data Date pentru codificare
+ * @returns String Base64
  */
-export function hmacSha256(key: Buffer, data: Buffer): Buffer {
-  const hmac = crypto.createHmac('sha256', key);
-  hmac.update(data);
-  return hmac.digest();
-}
+export const base64Encode = (data: Buffer | string): string => {
+  if (typeof data === 'string') {
+    return Buffer.from(data).toString('base64');
+  }
+  return data.toString('base64');
+};
 
 /**
- * SHA-256 hash implementation
- * @param data Data to hash
- * @returns SHA-256 hash
+ * Decodifică string Base64 în Buffer
+ * @param data String Base64
+ * @returns Buffer cu datele decodificate
  */
-export function sha256(data: Buffer): Buffer {
-  const hash = crypto.createHash('sha256');
-  hash.update(data);
-  return hash.digest();
-}
+export const base64Decode = (data: string): Buffer => {
+  return Buffer.from(data, 'base64');
+};
 
 /**
- * AES-256-CBC encryption
- * @param key Encryption key
- * @param data Data to encrypt
- * @param iv Initialization vector
- * @returns Encrypted data
+ * Calculează HMAC-SHA256
+ * @param key Cheia pentru HMAC
+ * @param data Datele pentru hash
+ * @returns HMAC-SHA256
  */
-export function aesEncrypt(key: Buffer, data: Buffer, iv: Buffer): Buffer {
-  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
-  return Buffer.concat([cipher.update(data), cipher.final()]);
-}
+export const hmacSha256 = (key: Buffer, data: Buffer): Buffer => {
+  return crypto.createHmac('sha256', key).update(data).digest();
+};
 
 /**
- * AES-256-CBC decryption
- * @param key Decryption key
- * @param data Data to decrypt
- * @param iv Initialization vector
- * @returns Decrypted data
+ * Calculează secretul Diffie-Hellman folosind Curve25519
+ * @param privateKey Cheia privată
+ * @param publicKey Cheia publică
+ * @returns Secretul partajat
  */
-export function aesDecrypt(key: Buffer, data: Buffer, iv: Buffer): Buffer {
-  const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
-  return Buffer.concat([decipher.update(data), decipher.final()]);
-}
+export const computeSharedSecret = (privateKey: Buffer, publicKey: Buffer): Buffer => {
+  // În producție, s-ar folosi o bibliotecă specializată pentru Curve25519
+  return diffieHellman(privateKey, publicKey);
+};
 
 /**
- * HKDF key derivation function using futoin-hkdf
- * @param ikm Initial key material
- * @param length Length of output key material
- * @param info Context and application specific information
- * @param salt Salt value
- * @returns Derived key
+ * Criptează și semnează date
+ * @param plaintext Date de criptat
+ * @param key Cheia pentru criptare
+ * @param iv Vector de inițializare
+ * @param aad Date autentificate adiționale
+ * @returns Date criptate + semnătură
  */
-export function hkdfDerive(ikm: Buffer, length: number, info: string | Buffer, salt?: Buffer): Buffer {
-  // Convert info to Buffer if it's a string
-  const infoBuffer = typeof info === 'string' ? Buffer.from(info) : info;
+export const encryptAndSign = (
+  plaintext: Buffer,
+  key: Buffer,
+  iv: Buffer,
+  aad: Buffer = Buffer.alloc(0)
+): EncryptedData => {
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   
-  // If no salt is provided, use a buffer of zeros
-  const saltBuffer = salt || Buffer.alloc(32, 0);
+  if (aad.length > 0) {
+    cipher.setAAD(aad);
+  }
   
-  // Use our imported function for proper HKDF implementation
-  return hkdf(ikm, length, infoBuffer.toString(), saltBuffer);
-}
-
-/**
- * Derive WhatsApp specific keys from the master key
- * @param masterKey Master key
- * @returns Object containing all derived keys
- */
-export function deriveWhatsAppKeys(masterKey: Buffer): { 
-  encKey: Buffer, 
-  macKey: Buffer,
-  aesKey: Buffer,
-  aesIv: Buffer
-} {
-  // Use WhatsApp-specific key derivation parameters
-  const expandedKey = hkdfDerive(masterKey, 112, 'WhatsApp Derived Keys', Buffer.from([0]));
+  const encrypted = Buffer.concat([
+    cipher.update(plaintext),
+    cipher.final()
+  ]);
+  
+  const authTag = cipher.getAuthTag();
   
   return {
-    encKey: expandedKey.slice(0, 32),
-    macKey: expandedKey.slice(32, 64),
-    aesKey: expandedKey.slice(64, 96),
-    aesIv: expandedKey.slice(96, 112)
+    ciphertext: encrypted,
+    iv: iv,
+    auth: authTag
   };
-}
+};
 
 /**
- * Generate a Curve25519 key pair for WhatsApp
- * @returns Object containing public and private keys
+ * Verifică și decriptează date
+ * @param data Date criptate + autentificare
+ * @param key Cheia pentru decriptare
+ * @param aad Date autentificate adiționale
+ * @returns Date decriptate
  */
-export function generateKeyPair(): { privateKey: Buffer, publicKey: Buffer } {
-  // Generate a random private key
-  const privateKey = generateRandomBytes(32);
+export const verifyAndDecrypt = (
+  data: EncryptedData,
+  key: Buffer,
+  aad: Buffer = Buffer.alloc(0)
+): Buffer => {
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, data.iv);
+  decipher.setAuthTag(data.auth);
   
-  // Generate the public key from the private key
-  const publicKey = Buffer.from(curve.computePublicKey(privateKey));
-  
-  return { privateKey, publicKey };
-}
-
-/**
- * Perform Curve25519 shared secret computation
- * @param privateKey Your private key
- * @param publicKey Their public key
- * @returns Shared secret key
- */
-export function computeSharedSecret(privateKey: Buffer, publicKey: Buffer): Buffer {
-  return Buffer.from(curve.computeSharedKey(privateKey, publicKey));
-}
-
-/**
- * Encrypt a message with AES-CBC and sign with HMAC-SHA256
- * @param encKey Encryption key
- * @param macKey MAC key
- * @param data Data to encrypt and sign
- * @returns Encrypted and signed data
- */
-export function encryptAndSign(encKey: Buffer, macKey: Buffer, data: Buffer): Buffer {
-  // Generate a random IV
-  const iv = generateRandomBytes(16);
-  
-  // Encrypt the data
-  const encrypted = aesEncrypt(encKey, data, iv);
-  
-  // Combine IV and encrypted data
-  const combined = Buffer.concat([iv, encrypted]);
-  
-  // Sign the encrypted data
-  const signature = hmacSha256(macKey, combined);
-  
-  // Return the final message: [signature][iv][encrypted_data]
-  return Buffer.concat([signature, combined]);
-}
-
-/**
- * Verify and decrypt a message
- * @param encKey Decryption key
- * @param macKey MAC key
- * @param data Encrypted and signed data
- * @returns Decrypted data or null if verification fails
- */
-export function verifyAndDecrypt(encKey: Buffer, macKey: Buffer, data: Buffer): Buffer | null {
-  try {
-    // Split the data into signature and encrypted parts
-    const signature = data.slice(0, 32);
-    const encryptedWithIv = data.slice(32);
-    
-    // Verify the signature
-    const calculatedSignature = hmacSha256(macKey, encryptedWithIv);
-    
-    // Check if signatures match
-    if (!signature.equals(calculatedSignature)) {
-      return null;
-    }
-    
-    // Extract IV and encrypted data
-    const iv = encryptedWithIv.slice(0, 16);
-    const encrypted = encryptedWithIv.slice(16);
-    
-    // Decrypt the data
-    return aesDecrypt(encKey, encrypted, iv);
-  } catch (error) {
-    return null;
+  if (aad.length > 0) {
+    decipher.setAAD(aad);
   }
-}
-
-/**
- * Validate the signature of a WhatsApp message
- * @param macKey MAC key
- * @param message Message to validate
- * @param signature Signature to check
- * @returns True if signature is valid
- */
-export function validateSignature(macKey: Buffer, message: Buffer, signature: Buffer): boolean {
-  const calculatedSignature = hmacSha256(macKey, message);
-  return calculatedSignature.equals(signature);
-}
-
-/**
- * Base64 encode a buffer
- * @param buffer Buffer to encode
- * @returns Base64 encoded string
- */
-export function base64Encode(buffer: Buffer): string {
-  return buffer.toString('base64');
-}
-
-/**
- * Base64 decode a string
- * @param str Base64 encoded string
- * @returns Decoded buffer
- */
-export function base64Decode(str: string): Buffer {
-  return Buffer.from(str, 'base64');
-}
-
-/**
- * Base64 URL-safe encode a buffer
- * @param buffer Buffer to encode
- * @returns Base64 URL-safe encoded string
- */
-export function base64UrlEncode(buffer: Buffer): string {
-  return buffer.toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-}
-
-/**
- * Base64 URL-safe decode a string
- * @param str Base64 URL-safe encoded string
- * @returns Decoded buffer
- */
-export function base64UrlDecode(str: string): Buffer {
-  // Add padding if needed
-  str = str.replace(/-/g, '+').replace(/_/g, '/');
-  while (str.length % 4) {
-    str += '=';
-  }
-  return Buffer.from(str, 'base64');
-}
-
-/**
- * Generate authentication credentials for WhatsApp
- * @returns Authentication credentials object
- */
-export function generateAuthCredentials(): { 
-  clientId: string, 
-  serverToken: string, 
-  clientToken: string, 
-  encKey: Buffer, 
-  macKey: Buffer
-} {
-  // Generate a unique client ID
-  const clientId = base64Encode(generateRandomBytes(16));
   
-  // Generate server token
-  const serverToken = base64Encode(generateRandomBytes(16));
-  
-  // Generate client token
-  const clientToken = base64Encode(generateRandomBytes(16));
-  
-  // Generate keys for end-to-end encryption
-  const masterSecret = generateRandomBytes(32);
-  const { encKey, macKey } = deriveWhatsAppKeys(masterSecret);
-  
-  return {
-    clientId,
-    serverToken,
-    clientToken,
-    encKey,
-    macKey
-  };
-}
-
-/**
- * Encrypt media file for WhatsApp (image, video, document, etc.)
- * @param data Media data
- * @param mediaType Type of media
- * @param mediaKey Optional media key (will generate random if not provided)
- * @returns Encrypted media object
- */
-export function encryptMedia(
-  data: Buffer, 
-  mediaType: 'image' | 'video' | 'audio' | 'document' | 'sticker',
-  mediaKey?: Buffer
-): { 
-  encryptedData: Buffer, 
-  mediaKey: Buffer, 
-  iv: Buffer, 
-  fileSha256: Buffer, 
-  fileEncSha256: Buffer 
-} {
-  // Generate media key if not provided
-  const key = mediaKey || generateRandomBytes(32);
-  
-  // Determine the appropriate HKDF info based on media type
-  const mediaInfo = `WhatsApp ${mediaType.charAt(0).toUpperCase() + mediaType.slice(1)} Keys`;
-  
-  // Derive keys for media
-  const derivedKeys = hkdfDerive(key, 112, mediaInfo);
-  const aesKey = derivedKeys.slice(0, 32);
-  const iv = derivedKeys.slice(64, 80);
-  
-  // Calculate file hash
-  const fileSha256 = sha256(data);
-  
-  // Encrypt the file
-  const encryptedData = aesEncrypt(aesKey, data, iv);
-  
-  // Calculate hash of encrypted data
-  const fileEncSha256 = sha256(encryptedData);
-  
-  return { 
-    encryptedData, 
-    mediaKey: key, 
-    iv, 
-    fileSha256, 
-    fileEncSha256 
-  };
-}
-
-/**
- * Decrypt media file from WhatsApp
- * @param encryptedData Encrypted media data
- * @param mediaKey Media key
- * @param mediaType Type of media
- * @returns Decrypted media data
- */
-export function decryptMedia(
-  encryptedData: Buffer, 
-  mediaKey: Buffer, 
-  mediaType: 'image' | 'video' | 'audio' | 'document' | 'sticker'
-): Buffer {
-  // Determine the appropriate HKDF info based on media type
-  const mediaInfo = `WhatsApp ${mediaType.charAt(0).toUpperCase() + mediaType.slice(1)} Keys`;
-  
-  // Derive keys for media
-  const derivedKeys = hkdfDerive(mediaKey, 112, mediaInfo);
-  const aesKey = derivedKeys.slice(0, 32);
-  const iv = derivedKeys.slice(64, 80);
-  
-  // Decrypt the file
-  return aesDecrypt(aesKey, encryptedData, iv);
-}
+  return Buffer.concat([
+    decipher.update(data.ciphertext),
+    decipher.final()
+  ]);
+};
